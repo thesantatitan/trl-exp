@@ -11,6 +11,7 @@ class SVGRewardFunction:
                  format_weight: float = 1.0,
                  rendering_weight: float = 1.0,
                  clip_weight: float = 1.0,
+                 text_weight: float = 1.0,
                  device: Optional[str] = None):
         """Initialize the reward function with weights and CLIP model.
 
@@ -18,11 +19,13 @@ class SVGRewardFunction:
             format_weight: Weight for format checking reward
             rendering_weight: Weight for rendering success reward
             clip_weight: Weight for CLIP similarity reward
+            text_weight: Weight for text similarity reward
             device: Device to run CLIP on ('cuda' or 'cpu')
         """
         self.format_weight = format_weight
         self.rendering_weight = rendering_weight
         self.clip_weight = clip_weight
+        self.text_weight = text_weight
 
         # Setup device
         if device is None:
@@ -124,6 +127,22 @@ class SVGRewardFunction:
 
         return similarity_scores
 
+    def _clip_text_reward_func(self, rendered_pngs: List[bytes], text_embeddings: torch.Tensor) -> List[float]:
+        """Calculate CLIP similarity scores between rendered images and text embeddings."""
+        text_embeddings = text_embeddings.to(self.device)
+        similarity_scores = []
+
+        for png_data in rendered_pngs:
+            image_features = self._process_image(png_data)
+            similarity = torch.nn.functional.cosine_similarity(
+                image_features,
+                text_embeddings
+            ).item()
+            similarity = max(0.0, min(1.0, similarity))
+            similarity_scores.append(similarity)
+
+        return similarity_scores
+
     def encode_images(self, image_paths: List[str]) -> torch.Tensor:
         """Encode ground truth images for comparison."""
         all_features = []
@@ -139,12 +158,23 @@ class SVGRewardFunction:
 
         return torch.cat(all_features, dim=0)
 
-    def __call__(self, completions: List[Dict], ground_truth_embeddings: torch.Tensor) -> List[float]:
+    def encode_text(self, texts: List[str]) -> torch.Tensor:
+        """Encode text prompts for comparison."""
+        text_tokens = clip.tokenize(texts).to(self.device)
+
+        with torch.no_grad():
+            text_features = self.model.encode_text(text_tokens)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+        return text_features
+
+    def __call__(self, completions: List[Dict], ground_truth_embeddings: torch.Tensor, text_embeddings: Optional[torch.Tensor] = None) -> List[float]:
         """Calculate combined reward scores for completions.
 
         Args:
             completions: List of completion dictionaries with 'content' key
             ground_truth_embeddings: Ground truth CLIP embeddings to compare against
+            text_embeddings: Optional text embeddings to compare against
 
         Returns:
             List of combined reward scores
@@ -158,14 +188,21 @@ class SVGRewardFunction:
         # Calculate CLIP similarity scores
         clip_scores = self._clip_similarity(rendered_pngs, ground_truth_embeddings)
 
+        # Calculate text similarity scores if text embeddings are provided
+        if text_embeddings is not None:
+            text_scores = self._clip_text_reward_func(rendered_pngs, text_embeddings)
+        else:
+            text_scores = [0.0] * len(completions)
+
         # Combine scores using weights
         final_scores = []
-        for f, r, c in zip(format_scores, rendering_scores, clip_scores):
+        for f, r, c, t in zip(format_scores, rendering_scores, clip_scores, text_scores):
             weighted_score = (
                 self.format_weight * f +
                 self.rendering_weight * r +
-                self.clip_weight * c
-            ) / (self.format_weight + self.rendering_weight + self.clip_weight)
+                self.clip_weight * c +
+                self.text_weight * t
+            ) / (self.format_weight + self.rendering_weight + self.clip_weight + self.text_weight)
             final_scores.append(weighted_score)
 
         return final_scores
