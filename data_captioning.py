@@ -8,7 +8,7 @@ import logging
 import cairosvg
 import io
 from PIL import Image
-import moondream as md
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm.auto import tqdm
 
 # Set up logging with more detailed format
@@ -38,7 +38,7 @@ def timing_decorator(func):
     return wrapper
 
 class DatasetProcessor:
-    def __init__(self, source_repo: str, target_repo: str, token: str, moondream_path: str):
+    def __init__(self, source_repo: str, target_repo: str, token: str):
         """
         Initialize the dataset processor.
         """
@@ -52,7 +52,13 @@ class DatasetProcessor:
         # Initialize Moondream model
         logger.info("Initializing Moondream model...")
         start_time = time.time()
-        self.model = md.vl(model=moondream_path)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            "vikhyatk/moondream2",
+            revision="2025-01-09",
+            trust_remote_code=True,
+            # Uncomment to run on GPU
+            device_map={"": "cuda"}
+        )
         logger.info(f"Moondream initialization took {time.time() - start_time:.2f} seconds")
 
         # Login to Hugging Face
@@ -73,8 +79,7 @@ class DatasetProcessor:
     def generate_caption(self, image: Image.Image) -> str:
         """Generate caption for image using Moondream."""
         try:
-            encoded_image = self.model.encode_image(image)
-            caption = self.model.caption(encoded_image)["caption"]
+            caption = self.model.caption(image, length="short")["caption"]
             return caption
         except Exception as e:
             logger.error(f"Error generating caption: {e}")
@@ -202,11 +207,10 @@ def main():
     TARGET_REPO = "thesantatitan/tempm"
     TOKEN = os.getenv("HF_TOKEN")
     COLUMNS_TO_EXTRACT = ["input", "output"]
-    MOONDREAM_PATH = "./moondream-0_5b-int8.mf"
 
     # Initialize processor
     start_time = time.time()
-    processor = DatasetProcessor(SOURCE_REPO, TARGET_REPO, TOKEN, MOONDREAM_PATH)
+    processor = DatasetProcessor(SOURCE_REPO, TARGET_REPO, TOKEN)
     logger.info(f"Processor initialization took {time.time() - start_time:.2f} seconds")
 
     try:
