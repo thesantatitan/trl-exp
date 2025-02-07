@@ -22,7 +22,7 @@ def run_file_in_sandbox(python_file):
         .add_local_file(python_file, f"/{python_file}", copy=True)
     )
     envs = modal.Secret.from_dict({"HF_TOKEN": os.getenv('HF_TOKEN'),"TRANSFORMERS_VERBOSITY":"info"})
-
+    vols = modal.Volume.from_name("svg-dataset", create_if_missing=True)
     # Enable output streaming to see build logs
     with modal.enable_output():
         print("Creating sandbox with PyTorch image...")
@@ -33,7 +33,8 @@ def run_file_in_sandbox(python_file):
             timeout=60*60,
             gpu="a10g",
             secrets=[envs],
-            workdir='/'
+            workdir='/',
+            volumes={"/dataset":vols}
         )
 
         try:
@@ -43,6 +44,8 @@ def run_file_in_sandbox(python_file):
             process = sb.exec(
                 "python",
                 python_file,
+                "--number_of_batches" ,"16",
+                "--index", "1",
                 stdout=StreamType.STDOUT,  # Stream directly to stdout
                 stderr=StreamType.STDOUT   # Stream directly to stderr
             )

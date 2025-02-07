@@ -1,13 +1,14 @@
 import os
 import time
+import argparse
 from functools import wraps
 from datasets import load_dataset, Dataset
-from huggingface_hub import HfApi, create_repo, login
 import logging
 import io
 from PIL import Image
 from transformers import AutoModelForCausalLM
 from tqdm.auto import tqdm
+import math
 
 # Set up logging
 logging.basicConfig(
@@ -34,13 +35,14 @@ def timing_decorator(func):
     return wrapper
 
 class MoondreamCaptioner:
-    def __init__(self, source_repo: str, target_repo: str, token: str):
+    def __init__(self, source_repo: str, batch_index: int, total_batches: int, token: str):
         self.source_repo = source_repo
-        self.target_repo = target_repo
+        self.batch_index = batch_index
+        self.total_batches = total_batches
         self.token = token
-        self.api = HfApi()
         self.function_times = {}
         self.processed_count = 0
+        self.BATCH_SIZE = 8  # New constant for processing batch size
 
         # Initialize Moondream model
         logger.info("Initializing Moondream model...")
@@ -52,49 +54,100 @@ class MoondreamCaptioner:
             device_map={"": "cuda"}
         )
         logger.info(f"Moondream initialization took {time.time() - start_time:.2f} seconds")
-        login(token=token)
 
     @timing_decorator
     def load_dataset(self) -> Dataset:
         try:
-            logger.info(f"Loading dataset from {self.source_repo}")
-            dataset = load_dataset(self.source_repo)
-            logger.info(f"Successfully loaded dataset with {len(dataset['train'])} rows")
-            return dataset['train']
+            # First, get the total dataset size without downloading
+            logger.info(f"Getting dataset info from {self.source_repo}")
+            dataset_info = load_dataset(self.source_repo, split='train', streaming=True)
+            total_rows = dataset_info.info.splits['train'].num_examples
+
+            # Calculate batch boundaries
+            rows_per_batch = math.ceil(total_rows / self.total_batches)
+            start_idx = self.batch_index * rows_per_batch
+            end_idx = min(start_idx + rows_per_batch, total_rows)
+
+            logger.info(f"Processing batch {self.batch_index + 1}/{self.total_batches}")
+            logger.info(f"Rows {start_idx} to {end_idx} (total: {end_idx - start_idx})")
+
+            # Load only the required slice using streaming and take
+            dataset = load_dataset(
+                self.source_repo,
+                split='train',
+                streaming=True
+            )
+
+            # Skip to our section and take only what we need
+            batch_dataset = dataset.skip(start_idx).take(end_idx - start_idx)
+
+            # Convert streaming dataset to regular dataset for processing
+            return Dataset.from_generator(lambda: batch_dataset)
+
         except Exception as e:
             logger.error(f"Error loading dataset: {e}")
             raise
 
     @timing_decorator
-    def generate_captions(self, png_data: bytes) -> tuple:
-        """Generate both short and normal captions for an image."""
-        try:
-            image = Image.open(io.BytesIO(png_data))
-            short_caption = self.model.caption(image, length="short")["caption"]
-            normal_caption = self.model.caption(image)["caption"]
-            return short_caption, normal_caption
-        except Exception as e:
-            logger.error(f"Error generating captions: {e}")
-            return "Error generating short caption", "Error generating normal caption"
+    def generate_captions_batch(self, png_data_list: list) -> list:
+        """Generate both short and normal captions for a batch of images."""
+        results = []
+        for png_data in png_data_list:
+            try:
+                if png_data is None:
+                    results.append(({
+                        'moondream_short_caption': "Failed - No valid PNG data",
+                        'moondream_normal_caption': "Failed - No valid PNG data"
+                    }))
+                    continue
 
-    def process_row(self, row):
-        """Process a single row of the dataset."""
+                image = Image.open(io.BytesIO(png_data))
+                short_caption = self.model.caption(image, length="short")["caption"]
+                normal_caption = self.model.caption(image)["caption"]
+                results.append({
+                    'moondream_short_caption': short_caption,
+                    'moondream_normal_caption': normal_caption
+                })
+            except Exception as e:
+                logger.error(f"Error generating captions for image in batch: {e}")
+                results.append({
+                    'moondream_short_caption': "Error processing image",
+                    'moondream_normal_caption': "Error processing image"
+                })
+        return results
+
+    def process_batch(self, batch):
+        """Process a batch of rows from the dataset."""
         try:
-            self.processed_count += 1
+            self.processed_count += len(batch['png_data'])
             start_time = time.time()
 
-            if not row['png_processed'] or row['png_data'] is None:
-                return {
-                    'moondream_short_caption': "Failed - No valid PNG data",
-                    'moondream_normal_caption': "Failed - No valid PNG data"
-                }
+            # Filter valid PNG data
+            valid_png_data = [
+                data for data, is_processed in zip(batch['png_data'], batch['png_processed'])
+                if is_processed and data is not None
+            ]
 
-            short_caption, normal_caption = self.generate_captions(row['png_data'])
+            # Generate captions for valid images
+            caption_results = self.generate_captions_batch(valid_png_data)
+
+            # Prepare results for all images (including invalid ones)
+            all_results = []
+            result_idx = 0
+            for is_processed, data in zip(batch['png_processed'], batch['png_data']):
+                if is_processed and data is not None:
+                    all_results.append(caption_results[result_idx])
+                    result_idx += 1
+                else:
+                    all_results.append({
+                        'moondream_short_caption': "Failed - No valid PNG data",
+                        'moondream_normal_caption': "Failed - No valid PNG data"
+                    })
 
             processing_time = time.time() - start_time
 
-            # Log timing information every 10 items
-            if self.processed_count % 10 == 0:
+            # Log timing information every 50 items
+            if self.processed_count % 50 == 0:
                 avg_times = {
                     func: sum(times)/len(times)
                     for func, times in self.function_times.items()
@@ -102,47 +155,41 @@ class MoondreamCaptioner:
                 logger.info(
                     f"Processed {self.processed_count} items\n"
                     f"Average times:\n"
-                    f"  generate_captions: {avg_times.get('generate_captions', 0):.2f}s\n"
-                    f"  Total per item: {processing_time:.2f}s"
+                    f"  generate_captions_batch: {avg_times.get('generate_captions_batch', 0):.2f}s\n"
+                    f"  Total per batch: {processing_time:.2f}s"
                 )
 
+            # Combine results into a single dictionary for the batch
             return {
-                'moondream_short_caption': short_caption,
-                'moondream_normal_caption': normal_caption
+                'moondream_short_caption': [r['moondream_short_caption'] for r in all_results],
+                'moondream_normal_caption': [r['moondream_normal_caption'] for r in all_results]
             }
+
         except Exception as e:
-            logger.error(f"Error processing row: {e}")
+            logger.error(f"Error processing batch: {e}")
             return {
-                'moondream_short_caption': "Error processing image",
-                'moondream_normal_caption': "Error processing image"
+                'moondream_short_caption': ["Error processing batch"] * len(batch['png_data']),
+                'moondream_normal_caption': ["Error processing batch"] * len(batch['png_data'])
             }
 
     @timing_decorator
     def process_dataset(self, dataset: Dataset) -> Dataset:
-        """Add caption columns to the dataset."""
+        """Add caption columns to the dataset using batched processing."""
         try:
-            logger.info("Adding caption columns")
+            logger.info("Adding caption columns with batch processing")
             total_rows = len(dataset)
 
-            pbar = tqdm(total=total_rows, desc="Generating captions")
+            pbar = tqdm(total=total_rows, desc=f"Generating captions (Batch {self.batch_index + 1}/{self.total_batches})")
 
-            def map_function(example):
-                start_time = time.time()
-                captions = self.process_row(example)
-                example.update(captions)
-
-                processing_time = time.time() - start_time
-                pbar.set_postfix({
-                    'caption_avg': f"{sum(self.function_times.get('generate_captions', [0]))/max(len(self.function_times.get('generate_captions', [1])), 1):.2f}s",
-                    'total_avg': f"{processing_time:.2f}s"
-                })
-                pbar.update(1)
-                return example
+            def update_progress(_, processed_rows):
+                pbar.update(processed_rows)
 
             processed_dataset = dataset.map(
-                map_function,
-                batched=False,
-                num_proc=1  # Single process due to GPU usage
+                self.process_batch,
+                batched=True,
+                batch_size=self.BATCH_SIZE,
+                num_proc=1,  # Single process due to GPU usage
+                remove_columns=dataset.column_names
             )
 
             pbar.close()
@@ -153,33 +200,45 @@ class MoondreamCaptioner:
             raise
 
     @timing_decorator
-    def push_to_hub(self, dataset: Dataset) -> None:
-        """Push the processed dataset to HuggingFace Hub."""
+    def save_dataset(self, dataset: Dataset) -> None:
+        """Save the processed dataset locally."""
         try:
-            try:
-                create_repo(self.target_repo, private=False, token=self.token)
-                logger.info(f"Created new repository: {self.target_repo}")
-            except Exception as e:
-                logger.warning(f"Repository creation warning (might already exist): {e}")
+            # Create output directory if it doesn't exist
+            output_dir = f"/dataset/{self.batch_index}"
+            os.makedirs(output_dir, exist_ok=True)
 
-            logger.info("Pushing dataset to hub...")
-            dataset.push_to_hub(
-                self.target_repo,
-                private=False,
-                token=self.token
-            )
-            logger.info(f"Successfully pushed dataset to {self.target_repo}")
+            # Save the dataset to the specified directory
+            dataset.save_to_disk(output_dir)
+            logger.info(f"Successfully saved batch to {output_dir}")
         except Exception as e:
-            logger.error(f"Error pushing dataset: {e}")
+            logger.error(f"Error saving dataset: {e}")
             raise
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Process dataset in batches')
+    parser.add_argument('--number_of_batches', type=int, required=True,
+                      help='Total number of parallel processes')
+    parser.add_argument('--index', type=int, required=True,
+                      help='Index of current batch (0-based)')
+    args = parser.parse_args()
+
+    if args.index >= args.number_of_batches:
+        raise ValueError("Batch index must be less than number of batches")
+
     SOURCE_REPO = "thesantatitan/svg-rendered"
-    TARGET_REPO = "thesantatitan/svg-500k-moondream-captions"
     TOKEN = os.getenv("HF_TOKEN")
 
+    if TOKEN is None:
+        raise ValueError("HF_TOKEN environment variable not set")
+
     start_time = time.time()
-    captioner = MoondreamCaptioner(SOURCE_REPO, TARGET_REPO, TOKEN)
+    captioner = MoondreamCaptioner(
+        SOURCE_REPO,
+        args.index,
+        args.number_of_batches,
+        TOKEN
+    )
     logger.info(f"Initialization took {time.time() - start_time:.2f} seconds")
 
     try:
@@ -189,8 +248,8 @@ def main():
         # Process dataset
         processed_dataset = captioner.process_dataset(dataset)
 
-        # Push to HuggingFace Hub
-        captioner.push_to_hub(processed_dataset)
+        # Save locally
+        captioner.save_dataset(processed_dataset)
 
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
