@@ -51,7 +51,7 @@ class MoondreamCaptioner:
             "vikhyatk/moondream2",
             revision="2025-01-09",
             trust_remote_code=True,
-            device_map={"": "cuda"}
+            device_map={"": "mps"}
         )
         logger.info(f"Moondream initialization took {time.time() - start_time:.2f} seconds")
 
@@ -229,8 +229,8 @@ def main():
     SOURCE_REPO = "thesantatitan/svg-rendered"
     TOKEN = os.getenv("HF_TOKEN")
 
-    if TOKEN is None:
-        raise ValueError("HF_TOKEN environment variable not set")
+    # if TOKEN is None:
+        # raise ValueError("HF_TOKEN environment variable not set")
 
     start_time = time.time()
     captioner = MoondreamCaptioner(
