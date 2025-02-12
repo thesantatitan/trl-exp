@@ -35,14 +35,13 @@ def timing_decorator(func):
     return wrapper
 
 class MoondreamCaptioner:
-    def __init__(self, source_repo: str, batch_index: int, total_batches: int, token: str):
+    def __init__(self, source_repo: str, batch_size: int, token: str):
         self.source_repo = source_repo
-        self.batch_index = batch_index
-        self.total_batches = total_batches
+        self.batch_size = batch_size
         self.token = token
         self.function_times = {}
         self.processed_count = 0
-        self.BATCH_SIZE = 8  # New constant for processing batch size
+        self.BATCH_SIZE = 8  # Processing batch size for GPU operations
 
         # Initialize Moondream model
         logger.info("Initializing Moondream model...")
@@ -58,32 +57,11 @@ class MoondreamCaptioner:
     @timing_decorator
     def load_dataset(self) -> Dataset:
         try:
-            # First, get the total dataset size without downloading
-            logger.info(f"Getting dataset info from {self.source_repo}")
-            dataset_info = load_dataset(self.source_repo, split='train', streaming=True)
-            total_rows = dataset_info.info.splits['train'].num_examples
-
-            # Calculate batch boundaries
-            rows_per_batch = math.ceil(total_rows / self.total_batches)
-            start_idx = self.batch_index * rows_per_batch
-            end_idx = min(start_idx + rows_per_batch, total_rows)
-
-            logger.info(f"Processing batch {self.batch_index + 1}/{self.total_batches}")
-            logger.info(f"Rows {start_idx} to {end_idx} (total: {end_idx - start_idx})")
-
-            # Load only the required slice using streaming and take
-            dataset = load_dataset(
-                self.source_repo,
-                split='train',
-                streaming=True
-            )
-
-            # Skip to our section and take only what we need
-            batch_dataset = dataset.skip(start_idx).take(end_idx - start_idx)
-
-            # Convert streaming dataset to regular dataset for processing
-            return Dataset.from_generator(lambda: batch_dataset)
-
+            logger.info(f"Loading dataset from {self.source_repo}")
+            dataset = load_dataset(self.source_repo, split='train')
+            total_rows = len(dataset)
+            logger.info(f"Total dataset size: {total_rows} rows")
+            return dataset
         except Exception as e:
             logger.error(f"Error loading dataset: {e}")
             raise
@@ -159,7 +137,6 @@ class MoondreamCaptioner:
                     f"  Total per batch: {processing_time:.2f}s"
                 )
 
-            # Combine results into a single dictionary for the batch
             return {
                 'moondream_short_caption': [r['moondream_short_caption'] for r in all_results],
                 'moondream_normal_caption': [r['moondream_normal_caption'] for r in all_results]
@@ -173,69 +150,69 @@ class MoondreamCaptioner:
             }
 
     @timing_decorator
-    def process_dataset(self, dataset: Dataset) -> Dataset:
-        """Add caption columns to the dataset using batched processing."""
+    def process_dataset(self, dataset: Dataset) -> list:
+        """Process the dataset in batches and save each batch."""
         try:
-            logger.info("Adding caption columns with batch processing")
             total_rows = len(dataset)
+            batches = math.ceil(total_rows / self.batch_size)
+            logger.info(f"Processing dataset in {batches} batches")
 
-            pbar = tqdm(total=total_rows, desc=f"Generating captions (Batch {self.batch_index + 1}/{self.total_batches})")
+            processed_datasets = []
 
-            def update_progress(_, processed_rows):
-                pbar.update(processed_rows)
+            for batch_idx in range(batches):
+                start_idx = batch_idx * self.batch_size
+                end_idx = min(start_idx + self.batch_size, total_rows)
 
-            processed_dataset = dataset.map(
-                self.process_batch,
-                batched=True,
-                batch_size=self.BATCH_SIZE,
-                num_proc=1,  # Single process due to GPU usage
-                remove_columns=dataset.column_names
-            )
+                logger.info(f"Processing batch {batch_idx + 1}/{batches}")
+                logger.info(f"Rows {start_idx} to {end_idx}")
 
-            pbar.close()
-            return processed_dataset
+                # Get current batch
+                current_batch = dataset.select(range(start_idx, end_idx))
+
+                # Process the batch
+                processed_batch = current_batch.map(
+                    self.process_batch,
+                    batched=True,
+                    batch_size=self.BATCH_SIZE,
+                    num_proc=1,  # Single process due to GPU usage
+                    remove_columns=current_batch.column_names
+                )
+
+                # Save the batch
+                self.save_batch(processed_batch, batch_idx)
+                processed_datasets.append(processed_batch)
+
+            return processed_datasets
 
         except Exception as e:
             logger.error(f"Error processing dataset: {e}")
             raise
 
     @timing_decorator
-    def save_dataset(self, dataset: Dataset) -> None:
-        """Save the processed dataset locally."""
+    def save_batch(self, dataset: Dataset, batch_idx: int) -> None:
+        """Save a processed batch locally."""
         try:
-            # Create output directory if it doesn't exist
-            output_dir = f"/dataset/{self.batch_index}"
+            output_dir = f"/dataset/batch_{batch_idx}"
             os.makedirs(output_dir, exist_ok=True)
-
-            # Save the dataset to the specified directory
             dataset.save_to_disk(output_dir)
             logger.info(f"Successfully saved batch to {output_dir}")
         except Exception as e:
-            logger.error(f"Error saving dataset: {e}")
+            logger.error(f"Error saving batch: {e}")
             raise
 
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Process dataset in batches')
     parser.add_argument('--number_of_batches', type=int, required=True,
-                      help='Total number of parallel processes')
-    parser.add_argument('--index', type=int, required=True,
-                      help='Index of current batch (0-based)')
+                      help='Number of batches to split the dataset into')
     args = parser.parse_args()
-
-    if args.index >= args.number_of_batches:
-        raise ValueError("Batch index must be less than number of batches")
 
     SOURCE_REPO = "thesantatitan/svg-rendered"
     TOKEN = os.getenv("HF_TOKEN")
 
-    # if TOKEN is None:
-        # raise ValueError("HF_TOKEN environment variable not set")
-
     start_time = time.time()
     captioner = MoondreamCaptioner(
         SOURCE_REPO,
-        args.index,
         args.number_of_batches,
         TOKEN
     )
@@ -245,11 +222,10 @@ def main():
         # Load dataset
         dataset = captioner.load_dataset()
 
-        # Process dataset
-        processed_dataset = captioner.process_dataset(dataset)
+        # Process dataset in batches
+        processed_datasets = captioner.process_dataset(dataset)
 
-        # Save locally
-        captioner.save_dataset(processed_dataset)
+        logger.info("Successfully processed all batches")
 
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
