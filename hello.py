@@ -1,89 +1,72 @@
-# First, let's import our required libraries
+from datasets import load_dataset
+from PIL import Image
+import io
 import torch
-from torch.nn import functional as F
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import clip
+from typing import Dict
 
-# Let's use GPT-2 small for this example
-model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
-model = AutoModelForCausalLM.from_pretrained(model_name)
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+def prep_dataset(num_examples: int = 1000) -> Dict:
+    # System prompt for SVG generation
+    SYSTEM_PROMPT = """You are an expert at generating SVG code.
+    Your task is to generate SVG code that matches the given description.
+    Wrap your response in the following format:
+    <think>
+    [Your thoughts about how to approach this]
+    </think>
+    [Any additional context or explanation]
+    <svg>[Your SVG code here]</svg>"""
 
-device = torch.device("cpu")
-model = model.to(device)
+    # Load CLIP model
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, preprocess = clip.load("ViT-B/32", device=device)
+    model.eval()
 
+    # Load dataset with streaming
+    dataset = load_dataset(
+        "thesantatitan/svg-rendered-blip_captioned",
+        split="train",
+        streaming=True
+    )
 
-import re
-import vllm
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from datasets import Dataset
-from trl.trl.trainer.grpo_trainer import GRPOTrainer
-from trl.trl.trainer.grpo_config import GRPOConfig
+    def process_example(example):
+        # Create prompt
+        prompt = [
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': f"generate svg code for an image that looks like {example['caption']}"}
+        ]
 
-import pandas as pd
-dataset = pd.read_parquet("https://huggingface.co/datasets/PleIAs/verse-wikisource/resolve/main/verse_wikisource.parquet")
+        # Process image for CLIP
+        try:
+            image = Image.open(io.BytesIO(example['png_data'])).convert('RGB')
+            image_input = preprocess(image).unsqueeze(0).to(device)
 
-prompt_list = []
+            with torch.no_grad():
+                # Get image embeddings
+                image_features = model.encode_image(image_input)
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
-for verse in dataset["verse"].tolist()[0:1000]:
-  prompt_list.append(f"{verse}\n")
+                # Get text embeddings
+                text_tokens = clip.tokenize([example['caption']]).to(device)
+                text_features = model.encode_text(text_tokens)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-dataset = Dataset.from_dict({'prompt': prompt_list})
+                return {
+                    'prompt': prompt,
+                    'ground_truth_embeddings': image_features.cpu(),
+                    'text_embeddings': text_features.cpu()
+                }
+        except Exception as e:
+            print(f"Error processing example: {e}")
+            return {
+                'prompt': prompt,
+                'ground_truth_embeddings': torch.zeros(1, 512),
+                'text_embeddings': torch.zeros(1, 512)
+            }
 
-dataset
+    # Process the streaming dataset
+    processed_dataset = dataset.take(num_examples).map(
+        process_example,
+        remove_columns=dataset.features.keys()
+    )
 
-output_dir="outputs/Pleias-350m-GRPO"
-run_name="Pleias-350m-GRPO-Poetry"
-
-training_args = GRPOConfig(
-    output_dir=output_dir,
-    run_name=run_name,
-    learning_rate=5e-5,
-    adam_beta1 = 0.9,
-    adam_beta2 = 0.99,
-    weight_decay = 0.1,
-    warmup_ratio = 0.1,
-    lr_scheduler_type='cosine',
-    logging_steps=1,
-    bf16=True,
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=4,
-    num_generations=16,
-    max_prompt_length=256,
-    max_completion_length=200,
-    num_train_epochs=1,
-    save_steps=100,
-    max_grad_norm=0.1,
-    log_on_each_node=False,
-    use_vllm=True,
-    vllm_gpu_memory_utilization=.3,
-    vllm_device="cpu",
-    report_to="none" #I'm disabling Wandb.
-)
-
-def no_repetition_reward_func(completions, hey) -> list[float]:
-    # Handle both string and conversational formats
-    responses = []
-    for completion in completions:
-        if isinstance(completion, str):
-            responses.append(completion)
-        elif isinstance(completion, list):
-            responses.append(completion[0]["content"])
-        else:
-            raise ValueError(f"Unexpected completion format: {type(completion)}")
-
-    # Calculate continuous scores
-    scores = [1.0 for response in responses]
-
-    return scores
-
-trainer = GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    reward_funcs=[
-        no_repetition_reward_func,
-    ],
-    args=training_args,
-    train_dataset=dataset
-)
-trainer.train()
+    return processed_dataset
