@@ -1,3 +1,10 @@
+import cairosvg
+import io
+from PIL import Image
+from typing import List, Tuple, Optional, Dict, Union
+import torch
+import clip
+import re
 
 class SVGRewardFunction:
     def __init__(self,
@@ -105,36 +112,41 @@ class SVGRewardFunction:
             print(f"Error processing image: {e}")
             return torch.zeros(1, 512, device=self.device)
 
-    def _clip_similarity(self, rendered_pngs: List[bytes], ground_truth_embeddings: torch.Tensor) -> List[float]:
+    def _clip_similarity(self, rendered_pngs: List[bytes], ground_truth_embeddings: List[torch.Tensor]) -> List[float]:
         """Calculate CLIP similarity scores."""
-        ground_truth_embeddings = ground_truth_embeddings.to(self.device)
+        ground_truth_embeddings = [torch.tensor(g, device=self.device) for g in ground_truth_embeddings]
         similarity_scores = []
 
-        for png_data in rendered_pngs:
-            image_features = self._process_image(png_data)
-            similarity = torch.nn.functional.cosine_similarity(
-                image_features,
-                ground_truth_embeddings
-            ).item()
-            similarity = max(0.0, min(1.0, similarity))
-            similarity_scores.append(similarity)
+        for i,png_data in enumerate(rendered_pngs):
+            if png_data == b'':
+                similarity_scores.append(0.0)
+            else:
+                image_features = self._process_image(png_data)
+                similarity = torch.nn.functional.cosine_similarity(
+                    image_features,
+                    ground_truth_embeddings[i]
+                ).item()
+                similarity = max(0.0, min(1.0, similarity))
+                similarity_scores.append(similarity)
 
         return similarity_scores
 
-    def _clip_text_reward_func(self, rendered_pngs: List[bytes], text_embeddings: torch.Tensor) -> List[float]:
+    def _clip_text_reward_func(self, rendered_pngs: List[bytes], text_embeddings: List[torch.Tensorz) -> List[float]:
         """Calculate CLIP similarity scores between rendered images and text embeddings."""
-        text_embeddings = text_embeddings.to(self.device)
+        text_embeddings = [torch.tensor(t, device=self.device) for t in text_embeddings]
         similarity_scores = []
 
-        for png_data in rendered_pngs:
-            image_features = self._process_image(png_data)
-            similarity = torch.nn.functional.cosine_similarity(
-                image_features,
-                text_embeddings
-            ).item()
-            similarity = max(0.0, min(1.0, similarity))
-            similarity_scores.append(similarity)
-
+        for i,png_data in enumerate(rendered_pngs):
+            if png_data == b'':
+                similarity_scores.append(0.0)
+            else:
+                image_features = self._process_image(png_data)
+                similarity = torch.nn.functional.cosine_similarity(
+                    image_features,
+                    text_embeddings[i]
+                ).item()
+                similarity = max(0.0, min(1.0, similarity))
+                similarity_scores.append(similarity)
         return similarity_scores
 
     def encode_images(self, image_paths: List[str]) -> torch.Tensor:
@@ -162,13 +174,13 @@ class SVGRewardFunction:
 
         return text_features
 
-    def __call__(self, prompts: List[Dict], completions: List[Dict], ground_truth_embeddings: torch.Tensor, text_embeddings: Optional[torch.Tensor] = None) -> List[float]:
+    def __call__(self, prompts: List[Dict], completions: List[Dict], ground_truth_embeddings: List[torch.Tensor], text_embeddings: Optional[List[torch.Tensor]] = None) -> List[float]:
         """Calculate combined reward scores for completions.
 
         Args:
             completions: List of completion dictionaries with 'content' key
-            ground_truth_embeddings: Ground truth CLIP embeddings to compare against
-            text_embeddings: Optional text embeddings to compare against
+            ground_truth_embeddings: Ground truth CLIP embeddings to compare against (Tensor or List)
+            text_embeddings: Optional text embeddings to compare against (Tensor or List)
 
         Returns:
             List of combined reward scores
@@ -182,7 +194,7 @@ class SVGRewardFunction:
         # Calculate CLIP similarity scores
         clip_scores = self._clip_similarity(rendered_pngs, ground_truth_embeddings)
 
-        # Calculate text similarity scores if text embeddings are provided
+        # Handle text embeddings
         if text_embeddings is not None:
             text_scores = self._clip_text_reward_func(rendered_pngs, text_embeddings)
         else:
