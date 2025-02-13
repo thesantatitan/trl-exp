@@ -131,7 +131,7 @@ class SVGRewardFunction:
 
         return similarity_scores
 
-    def _clip_text_reward_func(self, rendered_pngs: List[bytes], text_embeddings: List[torch.Tensorz) -> List[float]:
+    def _clip_text_reward_func(self, rendered_pngs: List[bytes], text_embeddings: List[torch.Tensor]) -> List[float]:
         """Calculate CLIP similarity scores between rendered images and text embeddings."""
         text_embeddings = [torch.tensor(t, device=self.device) for t in text_embeddings]
         similarity_scores = []
