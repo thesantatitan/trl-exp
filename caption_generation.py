@@ -182,7 +182,7 @@ class MoondreamCaptioner:
                 self.save_batch(processed_batch, batch_idx)
                 processed_datasets.append(processed_batch)
 
-            return processed_datasets
+            # return processed_datasets
 
         except Exception as e:
             logger.error(f"Error processing dataset: {e}")
@@ -192,7 +192,7 @@ class MoondreamCaptioner:
     def save_batch(self, dataset: Dataset, batch_idx: int) -> None:
         """Save a processed batch locally."""
         try:
-            output_dir = f"/dataset/batch_{batch_idx}"
+            output_dir = f"./dataset/batch_{batch_idx}"
             os.makedirs(output_dir, exist_ok=True)
             dataset.save_to_disk(output_dir)
             logger.info(f"Successfully saved batch to {output_dir}")
@@ -223,7 +223,7 @@ def main():
         dataset = captioner.load_dataset()
 
         # Process dataset in batches
-        processed_datasets = captioner.process_dataset(dataset)
+        captioner.process_dataset(dataset)
 
         logger.info("Successfully processed all batches")
 
