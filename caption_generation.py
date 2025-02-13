@@ -179,6 +179,7 @@ class MoondreamCaptioner:
                 )
 
                 # Save the batch
+                print('saving')
                 self.save_batch(processed_batch, batch_idx)
                 processed_datasets.append(processed_batch)
 
