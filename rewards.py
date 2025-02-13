@@ -1,10 +1,3 @@
-import cairosvg
-import io
-from PIL import Image
-from typing import List, Tuple, Optional, Dict
-import torch
-import clip
-import re
 
 class SVGRewardFunction:
     def __init__(self,
@@ -42,11 +35,11 @@ class SVGRewardFunction:
         """Check format of completions and extract SVG content."""
         pattern = r'''
             ^
-            <think>
+            <reasoning>
             \s*
             (.*?)
             \s*
-            </think>
+            </reasoning>
             \s*
             (.*?)
             \s*
@@ -55,8 +48,9 @@ class SVGRewardFunction:
             (.*?)
             $
         '''
+        print(completions)
 
-        completion_contents = [completion["content"] for completion in completions]
+        completion_contents = [completion[0]["content"] for completion in completions]
         results = []
 
         for content in completion_contents:
@@ -168,7 +162,7 @@ class SVGRewardFunction:
 
         return text_features
 
-    def __call__(self, completions: List[Dict], ground_truth_embeddings: torch.Tensor, text_embeddings: Optional[torch.Tensor] = None) -> List[float]:
+    def __call__(self, prompts: List[Dict], completions: List[Dict], ground_truth_embeddings: torch.Tensor, text_embeddings: Optional[torch.Tensor] = None) -> List[float]:
         """Calculate combined reward scores for completions.
 
         Args:
