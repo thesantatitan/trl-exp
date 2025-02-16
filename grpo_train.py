@@ -3,8 +3,8 @@ import torch
 from datasets import load_dataset, Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig, GRPOTrainer
-from .rewards import SVGRewardFunction
-from .wandbtracker import WandbPredictionProgressCallback
+from rewards import SVGRewardFunction
+from wandbtracker import WandbPredictionProgressCallback
 
 # Load and prep dataset
 

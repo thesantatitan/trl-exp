@@ -1,6 +1,6 @@
 from transformers.integrations import WandbCallback
 import pandas as pd
-from .rewards import SVGRewardFunction
+from rewards import SVGRewardFunction
 
 class WandbPredictionProgressCallback(WandbCallback):
     """Custom WandbCallback to log model predictions during training.
