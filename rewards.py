@@ -1,7 +1,7 @@
 import cairosvg
 import io
 from PIL import Image
-from typing import List, Tuple, Optional, Dict, Union
+from typing import List, Tuple, Optional, Dict
 import torch
 import clip
 import re

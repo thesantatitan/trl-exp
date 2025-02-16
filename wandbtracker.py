@@ -10,13 +10,8 @@ class WandbPredictionProgressCallback(WandbCallback):
     model predictions as the training progresses.
 
     Attributes:
-        trainer (Trainer): The Hugging Face Trainer instance.
-        tokenizer (AutoTokenizer): The tokenizer associated with the model.
-        sample_dataset (Dataset): A subset of the validation dataset
-          for generating predictions.
-        num_samples (int, optional): Number of samples to select from
-          the validation dataset for generating predictions. Defaults to 100.
-        freq (int, optional): Frequency of logging. Defaults to 2.
+        reward_func (SVGRewardFunction): The reward function used to
+          evaluate the model's predictions.
     """
 
     def __init__(self, reward_func):
