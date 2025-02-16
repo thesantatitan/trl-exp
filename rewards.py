@@ -68,7 +68,7 @@ class SVGRewardFunction:
         results = []
 
         for content in completion_contents:
-            match = re.match(pattern, content, re.VERBOSE)
+            match = re.match(pattern, content, re.VERBOSE | re.DOTALL)
             if match:
                 results.append((1.0, match.group(3)))
             else:
