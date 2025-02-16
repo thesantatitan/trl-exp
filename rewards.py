@@ -195,6 +195,7 @@ class SVGRewardFunction:
         self.count_since_logged += len(completions)
 
         # Check format and extract SVGs
+        print(completions)
         format_scores, svg_strings = self._format_check(completions)
         self.rewards["format"] += sum(format_scores)
         # Render SVGs to PNG
