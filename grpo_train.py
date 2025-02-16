@@ -120,6 +120,7 @@ training_args = GRPOConfig(
     report_to="none",
     hub_strategy="every_save",
     push_to_hub=True,
+    eval_strategy="no"
 )
 
 model = AutoModelForCausalLM.from_pretrained(
