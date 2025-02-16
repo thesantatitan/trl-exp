@@ -143,7 +143,7 @@ model = AutoModelForCausalLM.from_pretrained(
 ).to("cuda")
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-tokenizer.pad_token = tokenizer.eos_token
+# tokenizer.pad_token = tokenizer.eos_token
 
 # use peft at your own risk; not working for me with multi-GPU training
 trainer = GRPOTrainer(
