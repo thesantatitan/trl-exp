@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional, Dict
 import torch
 import clip
 import re
+from func_timeout import func_timeout, FunctionTimedOut
 
 class SVGRewardFunction:
     def __init__(self,
@@ -87,7 +88,7 @@ class SVGRewardFunction:
                 continue
 
             try:
-                png_data = cairosvg.svg2png(bytestring=svg_string.encode('utf-8'))
+                png_data = func_timeout(10, cairosvg.svg2png, args=(svg_string.encode('utf-8'),))
                 if png_data is None:
                     results.append((0.0, b''))
                     continue
