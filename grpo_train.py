@@ -1,4 +1,5 @@
 import re
+from PIL.Image import SAVE
 import torch
 from datasets import load_dataset, Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -101,14 +102,15 @@ training_args = GRPOConfig(
     warmup_ratio = 0.1,
     lr_scheduler_type='cosine',
     logging_steps=1,
-    bf16=False,
+    bf16=True,
     per_device_train_batch_size=4,
-    gradient_accumulation_steps=4,
+    gradient_accumulation_steps=16,
     num_generations=4,
-    max_prompt_length=256,
-    max_completion_length=200,
+    max_prompt_length=512,
+    max_completion_length=4096,
     num_train_epochs=1,
-    save_steps=100,
+    save_strategy="steps",
+    save_steps=40,
     max_grad_norm=0.1,
     log_on_each_node=False,
     use_vllm=True,
@@ -116,6 +118,8 @@ training_args = GRPOConfig(
     vllm_dtype="half",
     vllm_device="cuda:0",
     report_to="none",
+    hub_strategy="every_save",
+    push_to_hub=True,
 )
 
 model = AutoModelForCausalLM.from_pretrained(
