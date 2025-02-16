@@ -25,15 +25,19 @@ Respond in the following format:
 </generated_svg>
 """
 
-def prep_dataset() -> Dataset:
+def prep_dataset(num_rows: int = None) -> Dataset:
     # Initialize SVGRewardFunction
     reward_function = SVGRewardFunction()
 
-    # Load entire dataset
+    # Load dataset with optional row limit
     dataset = load_dataset(
         "thesantatitan/svg-rendered-blip_captioned",
         split="train"
     )
+
+    # If num_rows is specified, select only that many rows
+    if num_rows is not None:
+        dataset = dataset.select(range(min(num_rows, len(dataset))))
 
     def process_example(example):
         # Create prompt
@@ -69,7 +73,7 @@ def prep_dataset() -> Dataset:
                 'text_embeddings': torch.zeros(1, 512)
             }
 
-    # Process the entire dataset
+    # Process the dataset
     processed_dataset = dataset.map(
         process_example,
         remove_columns=dataset.features.keys(),
@@ -79,7 +83,7 @@ def prep_dataset() -> Dataset:
 
     return processed_dataset
 
-dataset_svg = prep_dataset()
+dataset_svg = prep_dataset(1000)
 
 svg_reward_fn = SVGRewardFunction(
     format_weight=1.0,
