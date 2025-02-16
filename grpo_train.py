@@ -9,6 +9,7 @@ from PIL import Image
 from typing import List, Tuple, Optional, Dict
 import torch
 import clip
+from peft.tuners import LoraConfig
 from rewards import SVGRewardFunction
 from wandbtracker import WandbPredictionProgressCallback
 
@@ -104,6 +105,23 @@ model_name = "thesantatitan/Qwen2-0.5B-svg-SFT"
 output_dir="outputs/Qwen-0.5B-GRPO"
 run_name="Qwen-0.5B-GRPO-svg-after-sft"
 
+peft_config = LoraConfig(
+    r=8,  # Rank dimension
+    lora_alpha=32,  # Alpha scaling
+    lora_dropout=0.1,
+    bias="none",
+    task_type="CAUSAL_LM",
+    target_modules=[
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+    ],
+)
+
 training_args = GRPOConfig(
     output_dir=output_dir,
     run_name=run_name,
@@ -133,7 +151,9 @@ model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.bfloat16,
     device_map="cuda",
-    attn_implementation="flash_attention_2"
+    attn_implementation="flash_attention_2",
+    peft_config=peft_config,
+    load_in_8bit=True,
 ).to("cuda")
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -147,6 +167,6 @@ trainer = GRPOTrainer(
     args=training_args,
     train_dataset=dataset_svg,
     callbacks=[wandb_callback],
-    #peft_config=peft_config
+    peft_config=peft_config
 )
 trainer.train()
