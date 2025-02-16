@@ -94,7 +94,7 @@ svg_reward_fn = SVGRewardFunction(
 )
 
 wandb_callback = WandbPredictionProgressCallback(
-    reward_function=svg_reward_fn
+    reward_func=svg_reward_fn
 )
 
 model_name = "thesantatitan/Qwen2-0.5B-svg-SFT"
