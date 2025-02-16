@@ -1,3 +1,4 @@
+from .venv_vis.lib.python3.10.site-packages import attr
 import re
 import torch
 from datasets import load_dataset, Dataset
@@ -133,8 +134,7 @@ training_args = GRPOConfig(
     hub_strategy="every_save",
     push_to_hub=True,
     eval_strategy="no",
-    torch_empty_cache_steps=10,
-    attn_implementation="flash_attention_2"
+    torch_empty_cache_steps=10
 )
 
 model = AutoModelForCausalLM.from_pretrained(
