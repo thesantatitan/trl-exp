@@ -222,5 +222,6 @@ class SVGRewardFunction:
                 self.text_weight * t
             ) / (self.format_weight + self.rendering_weight + self.clip_weight + self.text_weight)
             final_scores.append(weighted_score)
-
+        print(self.rewards)
+        print(self.final_scores)
         return final_scores
