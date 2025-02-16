@@ -26,6 +26,7 @@ class WandbPredictionProgressCallback(WandbCallback):
 
     def on_predict(self, args, state, control, metrics, **kwargs):
         for k,v in self.reward_func.rewards.items():
+            print(f"{k}: {v}")
             metrics[f"reward/{k}"] = v/len(self.reward_func.count_since_logged)
             self.reward_func.rewards[k] = 0.0
         self.reward_func.count_since_logged = 0
