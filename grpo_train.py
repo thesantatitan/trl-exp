@@ -113,7 +113,7 @@ training_args = GRPOConfig(
     lr_scheduler_type='cosine',
     logging_steps=1,
     bf16=True,
-    per_device_train_batch_size=4,
+    per_device_train_batch_size=1,
     gradient_accumulation_steps=16,
     num_generations=4,
     max_prompt_length=512,
@@ -130,7 +130,8 @@ training_args = GRPOConfig(
     report_to="none",
     hub_strategy="every_save",
     push_to_hub=True,
-    eval_strategy="no"
+    eval_strategy="no",
+    torch_empty_cache_steps=10
 )
 
 model = AutoModelForCausalLM.from_pretrained(
