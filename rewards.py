@@ -26,6 +26,8 @@ class SVGRewardFunction:
         self.rendering_weight = rendering_weight
         self.clip_weight = clip_weight
         self.text_weight = text_weight
+        self.rewards = {"format": 0.0, "rendering": 0.0, "clip": 0.0, "text": 0.0}
+        self.count_since_logged = 0
 
         # Setup device
         if device is None:
@@ -50,7 +52,11 @@ class SVGRewardFunction:
             \s*
             (.*?)
             \s*
-            (<svg>.*?</svg>)
+            <generated_svg>
+            \s*
+            (.*?)
+            \s*
+            </generated_svg>
             \s*
             (.*?)
             $
@@ -185,20 +191,25 @@ class SVGRewardFunction:
         Returns:
             List of combined reward scores
         """
+        self.count_since_logged += len(completions)
+
         # Check format and extract SVGs
         format_scores, svg_strings = self._format_check(completions)
-
+        self.rewards["format"] += sum(format_scores)
         # Render SVGs to PNG
         rendering_scores, rendered_pngs = self._render_svg(svg_strings, format_scores)
+        self.rewards["rendering"] += sum(rendering_scores)
 
         # Calculate CLIP similarity scores
         clip_scores = self._clip_similarity(rendered_pngs, ground_truth_embeddings)
+        self.rewards["clip"] += sum(clip_scores)
 
         # Handle text embeddings
         if text_embeddings is not None:
             text_scores = self._clip_text_reward_func(rendered_pngs, text_embeddings)
         else:
             text_scores = [0.0] * len(completions)
+        self.rewards["text"] += sum(text_scores)
 
         # Combine scores using weights
         final_scores = []
