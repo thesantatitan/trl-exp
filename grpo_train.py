@@ -41,7 +41,8 @@ def prep_dataset() -> Dataset:
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user', 'content': f"generate svg code for an image that looks like {example['caption']}"}
         ]
-
+        if not example['png_processed']:
+            return
         try:
             # Process image using SVGRewardFunction's methods
             image = Image.open(io.BytesIO(example['png_data'])).convert('RGB')
