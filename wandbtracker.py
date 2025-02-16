@@ -1,12 +1,6 @@
 from transformers.integrations import WandbCallback
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-
+import pandas as pd
+from rewards import SVGRewardFunction
 
 class WandbPredictionProgressCallback(WandbCallback):
     """Custom WandbCallback to log model predictions during training.
@@ -31,9 +25,16 @@ class WandbPredictionProgressCallback(WandbCallback):
         self.reward_func = reward_func
 
     def on_predict(self, args, state, control, metrics, **kwargs):
-        logging.info("called on_predict")
+        for k,v in self.reward_func.rewards.items():
+            print(f"{k}: {v}")
+            metrics[f"reward/{k}"] = v/len(self.reward_func.count_since_logged)
+            self.reward_func.rewards[k] = 0.0
+        self.reward_func.count_since_logged = 0
         super().on_predict(args, state, control, metrics, **kwargs)
 
     def on_log(self, args, state, control, model=None, logs=None, **kwargs):
-        logging.info("called on_log")
-        super().on_log(args, state, control, model=model, logs=logs, **kwargs)
+        for k,v in self.reward_func.rewards.items():
+            logs[f"reward/{k}"] = v/len(self.reward_func.count_since_logged)
+            self.reward_func.rewards[k] = 0.0
+        self.reward_func.count_since_logged = 0
+        super().on_log(args, state, control, model, logs, **kwargs)
