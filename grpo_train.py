@@ -132,7 +132,6 @@ training_args = GRPOConfig(
     hub_strategy="every_save",
     push_to_hub=True,
     eval_strategy="no",
-    torch_empty_cache_steps=10,
 )
 
 model = AutoModelForCausalLM.from_pretrained(
