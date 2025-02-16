@@ -95,6 +95,9 @@ class SVGRewardFunction:
 
                 Image.open(io.BytesIO(png_data))
                 results.append((1.0, png_data))
+            except FunctionTimedOut:
+                print("SVG rendering timed out")
+                results.append((0.0, b''))
             except Exception as e:
                 print(f"Rendering failed: {e}")
                 results.append((0.0, b''))
