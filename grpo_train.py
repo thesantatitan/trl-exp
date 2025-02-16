@@ -85,7 +85,7 @@ def prep_dataset(num_rows: int = None) -> Dataset:
 
     return processed_dataset
 
-dataset_svg = prep_dataset(1000)
+dataset_svg = prep_dataset(5000)
 
 svg_reward_fn = SVGRewardFunction(
     format_weight=1.0,
@@ -115,9 +115,9 @@ training_args = GRPOConfig(
     lr_scheduler_type='cosine',
     logging_steps=1,
     bf16=True,
-    per_device_train_batch_size=8,
-    gradient_accumulation_steps=4,
-    num_generations=8,
+    per_device_train_batch_size=4,
+    gradient_accumulation_steps=8,
+    num_generations=4,
     max_prompt_length=512,
     max_completion_length=2048,
     num_train_epochs=1,
@@ -126,14 +126,13 @@ training_args = GRPOConfig(
     max_grad_norm=0.1,
     log_on_each_node=False,
     use_vllm=True,
-    vllm_gpu_memory_utilization=0.25,
-    vllm_dtype="half",
+    vllm_gpu_memory_utilization=0.2,
     vllm_device="cuda:0",
     report_to="none",
     hub_strategy="every_save",
     push_to_hub=True,
     eval_strategy="no",
-    torch_empty_cache_steps=10
+    torch_empty_cache_steps=10,
 )
 
 model = AutoModelForCausalLM.from_pretrained(
