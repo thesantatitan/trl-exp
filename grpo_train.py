@@ -43,7 +43,8 @@ def prep_dataset(num_rows: int = None) -> Dataset:
         # Create prompt
         prompt = [
             {'role': 'system', 'content': SYSTEM_PROMPT},
-            {'role': 'user', 'content': f"generate svg code for an image that looks like {example['caption']}"}
+            {'role': 'user', 'content': f"generate svg code for an image that looks like {example['caption']}"},
+            {'role': 'assistant', 'content': "<reasoning>"}
         ]
         if not example['png_processed']:
             return
