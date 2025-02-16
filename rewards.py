@@ -28,6 +28,7 @@ class SVGRewardFunction:
         self.text_weight = text_weight
         self.rewards = {"format": 0.0, "rendering": 0.0, "clip": 0.0, "text": 0.0}
         self.count_since_logged = 0
+        self.__name__ = "SVGRewardFunction"
 
         # Setup device
         if device is None:
@@ -61,7 +62,7 @@ class SVGRewardFunction:
             (.*?)
             $
         '''
-        print(completions)
+        # print(completions)
 
         completion_contents = [completion[0]["content"] for completion in completions]
         results = []
