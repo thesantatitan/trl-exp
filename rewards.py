@@ -83,7 +83,7 @@ class SVGRewardFunction:
 
         for svg_string, format_score in zip(svg_strings, format_scores):
             if format_score == 0.0 or not svg_string:
-                results.append((0.0, b''))
+                results.append((0.0, None))
                 continue
 
             try:
@@ -125,7 +125,7 @@ class SVGRewardFunction:
         similarity_scores = []
 
         for i,png_data in enumerate(rendered_pngs):
-            if png_data == b'':
+            if not png_data:
                 similarity_scores.append(0.0)
             else:
                 image_features = self._process_image(png_data)
@@ -144,7 +144,7 @@ class SVGRewardFunction:
         similarity_scores = []
 
         for i,png_data in enumerate(rendered_pngs):
-            if png_data == b'':
+            if not png_data:
                 similarity_scores.append(0.0)
             else:
                 image_features = self._process_image(png_data)
