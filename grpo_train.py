@@ -1,4 +1,3 @@
-from .venv_vis.lib.python3.10.site-packages import attr
 import re
 import torch
 from datasets import load_dataset, Dataset
