@@ -89,9 +89,9 @@ dataset_svg = prep_dataset(1000)
 
 svg_reward_fn = SVGRewardFunction(
     format_weight=1.0,
-    rendering_weight=1.0,
-    clip_weight=1.0,
-    text_weight=1.0,
+    rendering_weight=2.0,
+    clip_weight=4.0,
+    text_weight=4.0,
     device="cuda"
 )
 
