@@ -133,13 +133,15 @@ training_args = GRPOConfig(
     hub_strategy="every_save",
     push_to_hub=True,
     eval_strategy="no",
-    torch_empty_cache_steps=10
+    torch_empty_cache_steps=10,
+    attn_implementation="flash_attention_2"
 )
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.bfloat16,
-    device_map=None
+    device_map=None,
+    attn_implementation="flash_attention_2"
 ).to("cuda")
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
