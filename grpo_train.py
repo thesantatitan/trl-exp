@@ -80,6 +80,7 @@ def prep_dataset(num_rows: int = None) -> Dataset:
         desc="Processing dataset",
         num_proc=1  # Set to higher number for parallel processing if needed
     )
+    del reward_function
 
     return processed_dataset
 
@@ -113,7 +114,7 @@ training_args = GRPOConfig(
     lr_scheduler_type='cosine',
     logging_steps=1,
     bf16=True,
-    per_device_train_batch_size=1,
+    per_device_train_batch_size=4,
     gradient_accumulation_steps=16,
     num_generations=4,
     max_prompt_length=512,
