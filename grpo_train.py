@@ -1,9 +1,14 @@
 import re
-from PIL.Image import SAVE
 import torch
 from datasets import load_dataset, Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig, GRPOTrainer
+import cairosvg
+import io
+from PIL import Image
+from typing import List, Tuple, Optional, Dict
+import torch
+import clip
 from rewards import SVGRewardFunction
 from wandbtracker import WandbPredictionProgressCallback
 
