@@ -46,11 +46,11 @@ class SVGRewardFunction:
         """Check format of completions and extract SVG content."""
         pattern = r'''
             ^
-            <reasoning>
+            <think>
             \s*
             (.*?)
             \s*
-            </reasoning>
+            </think>
             \s*
             (.*?)
             \s*

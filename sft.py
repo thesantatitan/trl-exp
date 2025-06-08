@@ -70,9 +70,9 @@ def formatting_prompts_func(example):
     output_texts = []
     SYSTEM_PROMPT = f'''
     Respond in the following format:
-    <reasoning>
+    <think>
     ...
-    </reasoning>
+    </think>
     ...
     <generated_svg>
     ...
