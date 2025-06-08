@@ -44,7 +44,8 @@ class SVGRewardFunction:
 
     def _format_check(self, completions: List[Dict]) -> Tuple[List[float], List[str]]:
         """Check format of completions and extract SVG content."""
-        pattern = r'''
+        # Strict pattern for format scoring
+        strict_pattern = r'''
             ^
             <think>
             \s*
@@ -63,17 +64,33 @@ class SVGRewardFunction:
             (.*?)
             $
         '''
-        # print(completions)
-
+        
+        # Lenient pattern to extract SVG content even if format is not perfect
+        lenient_svg_pattern = r'<generated_svg>\s*(.*?)\s*</generated_svg>'
+        
         completion_contents = [completion[0]["content"] for completion in completions]
         results = []
 
         for content in completion_contents:
-            match = re.match(pattern, content, re.VERBOSE | re.DOTALL)
-            if match:
-                results.append((1.0, match.group(3)))
+            # Check strict format for scoring
+            strict_match = re.match(strict_pattern, content, re.VERBOSE | re.DOTALL)
+            
+            if strict_match:
+                # Perfect format - full score and extract SVG
+                results.append((1.0, strict_match.group(3)))
             else:
-                results.append((0.0, ""))
+                # Try lenient extraction for SVG content
+                lenient_match = re.search(lenient_svg_pattern, content, re.DOTALL)
+                if lenient_match:
+                    # Format is not perfect but SVG is present - partial score
+                    results.append((0.5, lenient_match.group(1)))
+                else:
+                    # No SVG found at all - try to find any SVG-like content
+                    svg_like = re.search(r'<svg[^>]*>.*?</svg>', content, re.DOTALL | re.IGNORECASE)
+                    if svg_like:
+                        results.append((0.25, svg_like.group(0)))
+                    else:
+                        results.append((0.0, ""))
 
         scores, svg_contents = zip(*results)
         return list(scores), list(svg_contents)
@@ -83,7 +100,8 @@ class SVGRewardFunction:
         results: List[Tuple[float, bytes]] = []
 
         for svg_string, format_score in zip(svg_strings, format_scores):
-            if format_score == 0.0 or not svg_string:
+            # Remove the format score dependency - try to render any SVG content
+            if not svg_string:
                 results.append((0.0, None))
                 continue
 
