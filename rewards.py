@@ -6,6 +6,7 @@ import torch
 import clip
 import re
 from func_timeout import func_timeout, FunctionTimedOut
+import numpy as np
 
 class SVGRewardFunction:
     def __init__(self,
@@ -13,6 +14,7 @@ class SVGRewardFunction:
                  rendering_weight: float = 1.0,
                  clip_weight: float = 1.0,
                  text_weight: float = 1.0,
+                 mse_weight: float = 1.0,
                  device: Optional[str] = None):
         """Initialize the reward function with weights and CLIP model.
 
@@ -21,13 +23,15 @@ class SVGRewardFunction:
             rendering_weight: Weight for rendering success reward
             clip_weight: Weight for CLIP similarity reward
             text_weight: Weight for text similarity reward
+            mse_weight: Weight for MSE reward
             device: Device to run CLIP on ('cuda' or 'cpu')
         """
         self.format_weight = format_weight
         self.rendering_weight = rendering_weight
         self.clip_weight = clip_weight
         self.text_weight = text_weight
-        self.rewards = {"format": 0.0, "rendering": 0.0, "clip": 0.0, "text": 0.0}
+        self.mse_weight = mse_weight
+        self.rewards = {"format": 0.0, "rendering": 0.0, "clip": 0.0, "text": 0.0, "mse": 0.0}
         self.count_since_logged = 0
         self.__name__ = "SVGRewardFunction"
 
@@ -203,13 +207,60 @@ class SVGRewardFunction:
 
         return text_features
 
-    def __call__(self, prompts: List[Dict], completions: List[Dict], ground_truth_embeddings: List[torch.Tensor], text_embeddings: Optional[List[torch.Tensor]] = None) -> List[float]:
+    def _calculate_mse(self, rendered_pngs: List[bytes], input_images: List[Image.Image]) -> List[float]:
+        """Calculate MSE between rendered SVGs and input images, scaled to 0-1.
+        
+        Args:
+            rendered_pngs: List of rendered PNG bytes
+            input_images: List of PIL Image objects to compare against
+            
+        Returns:
+            List of MSE scores (0-1, where 1 is best/lowest error)
+        """
+        mse_scores = []
+        
+        for png_data, input_img in zip(rendered_pngs, input_images):
+            if not png_data:
+                mse_scores.append(0.0)
+                continue
+                
+            try:
+                # Convert rendered PNG to PIL Image
+                rendered_img = Image.open(io.BytesIO(png_data)).convert('RGB')
+                
+                # Resize input image to match rendered image size
+                input_img_resized = input_img.convert('RGB').resize(rendered_img.size, Image.Resampling.LANCZOS)
+                
+                # Convert to numpy arrays
+                rendered_arr = np.array(rendered_img, dtype=np.float32) / 255.0
+                input_arr = np.array(input_img_resized, dtype=np.float32) / 255.0
+                
+                # Calculate MSE
+                mse = np.mean((rendered_arr - input_arr) ** 2)
+                
+                # Scale MSE to 0-1 range (1 is best, 0 is worst)
+                # Using exponential decay: score = exp(-k * mse)
+                # k=10 means MSE of 0.1 gives score ~0.37
+                mse_score = np.exp(-10 * mse)
+                
+                mse_scores.append(float(mse_score))
+                
+            except Exception as e:
+                print(f"Error calculating MSE: {e}")
+                mse_scores.append(0.0)
+                
+        return mse_scores
+
+    def __call__(self, prompts: List[Dict], completions: List[Dict], ground_truth_embeddings: List[torch.Tensor], text_embeddings: Optional[List[torch.Tensor]] = None, input_images: Optional[List[Image.Image]] = None, mse_reward: bool = False) -> List[float]:
         """Calculate combined reward scores for completions.
 
         Args:
+            prompts: List of prompt dictionaries
             completions: List of completion dictionaries with 'content' key
             ground_truth_embeddings: Ground truth CLIP embeddings to compare against (Tensor or List)
             text_embeddings: Optional text embeddings to compare against (Tensor or List)
+            input_images: Optional list of input images for MSE calculation
+            mse_reward: Whether to calculate MSE reward (requires input_images)
 
         Returns:
             List of combined reward scores
@@ -234,15 +285,29 @@ class SVGRewardFunction:
             text_scores = [0.0] * len(completions)
         self.rewards["text"] += sum(text_scores)
 
+        # Handle MSE reward
+        if mse_reward:
+            if input_images is None:
+                raise ValueError("MSE reward requested but no input images provided")
+            mse_scores = self._calculate_mse(rendered_pngs, input_images)
+        else:
+            mse_scores = [0.0] * len(completions)
+        self.rewards["mse"] += sum(mse_scores)
+
         # Combine scores using weights
         final_scores = []
-        for f, r, c, t in zip(format_scores, rendering_scores, clip_scores, text_scores):
+        total_weight = self.format_weight + self.rendering_weight + self.clip_weight + self.text_weight
+        if mse_reward:
+            total_weight += self.mse_weight
+            
+        for f, r, c, t, m in zip(format_scores, rendering_scores, clip_scores, text_scores, mse_scores):
             weighted_score = (
                 self.format_weight * f +
                 self.rendering_weight * r +
                 self.clip_weight * c +
-                self.text_weight * t
-            ) / (self.format_weight + self.rendering_weight + self.clip_weight + self.text_weight)
+                self.text_weight * t +
+                (self.mse_weight * m if mse_reward else 0)
+            ) / total_weight
             final_scores.append(weighted_score)
         # print(self.rewards)
         # print(final_scores)
