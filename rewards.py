@@ -12,18 +12,18 @@ class SVGRewardFunction:
     def __init__(self,
                  format_weight: float = 1.0,
                  rendering_weight: float = 1.0,
-                 clip_weight: float = 1.0,
+                 clip_weight: float = 0.0,
                  text_weight: float = 1.0,
-                 mse_weight: float = 1.0,
+                 mse_weight: float = 0.0,
                  device: Optional[str] = None):
         """Initialize the reward function with weights and CLIP model.
 
         Args:
             format_weight: Weight for format checking reward
             rendering_weight: Weight for rendering success reward
-            clip_weight: Weight for CLIP similarity reward
+            clip_weight: Weight for CLIP similarity reward (default: 0.0)
             text_weight: Weight for text similarity reward
-            mse_weight: Weight for MSE reward
+            mse_weight: Weight for MSE reward (default: 0.0)
             device: Device to run CLIP on ('cuda' or 'cpu')
         """
         self.format_weight = format_weight
@@ -198,14 +198,77 @@ class SVGRewardFunction:
         return torch.cat(all_features, dim=0)
 
     def encode_text(self, texts: List[str]) -> torch.Tensor:
-        """Encode text prompts for comparison."""
-        text_tokens = clip.tokenize(texts).to(self.device)
+        """Encode text prompts for comparison with chunking for long texts."""
+        all_text_features = []
+        
+        # Import the tokenizer that CLIP uses
+        import clip.simple_tokenizer as tokenizer
+        _tokenizer = tokenizer.SimpleTokenizer()
+        
+        for text in texts:
+            try:
+                # Manually tokenize to get the actual tokens
+                tokens_list = _tokenizer.encode(text)
+                
+                if len(tokens_list) <= 75:  # Leave room for start/end tokens
+                    # Text fits in single context window - use normal tokenization
+                    text_tokens = clip.tokenize([text], truncate=True).to(self.device)
+                    with torch.no_grad():
+                        text_features = self.model.encode_text(text_tokens)
+                        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                    all_text_features.append(text_features)
+                else:
+                    # Text is too long - need to chunk it
+                    chunk_size = 75  # Leave room for start/end tokens
+                    overlap = 20  # Overlap between chunks
+                    stride = chunk_size - overlap
+                    
+                    # Decode tokens back to text for chunking
+                    # Split by decoding chunks of tokens
+                    chunk_embeddings = []
+                    
+                    for i in range(0, len(tokens_list), stride):
+                        # Get chunk of tokens
+                        chunk_tokens = tokens_list[i:i + chunk_size]
+                        
+                        # Decode back to text
+                        chunk_text = _tokenizer.decode(chunk_tokens)
+                        
+                        # Tokenize chunk with CLIP (now it will fit)
+                        chunk_tokenized = clip.tokenize([chunk_text], truncate=True).to(self.device)
+                        
+                        with torch.no_grad():
+                            chunk_features = self.model.encode_text(chunk_tokenized)
+                            chunk_features = chunk_features / chunk_features.norm(dim=-1, keepdim=True)
+                        chunk_embeddings.append(chunk_features)
+                        
+                        # Break if we've processed all tokens
+                        if i + chunk_size >= len(tokens_list):
+                            break
+                    
+                    # Average all chunk embeddings
+                    if chunk_embeddings:
+                        averaged_features = torch.stack(chunk_embeddings).mean(dim=0)
+                        averaged_features = averaged_features / averaged_features.norm(dim=-1, keepdim=True)
+                        all_text_features.append(averaged_features)
+                    else:
+                        # Fallback - should not happen
+                        text_tokens = clip.tokenize([text], truncate=True).to(self.device)
+                        with torch.no_grad():
+                            text_features = self.model.encode_text(text_tokens)
+                            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                        all_text_features.append(text_features)
+                        
+            except Exception as e:
+                print(f"Error encoding text: {e}")
+                # Fallback to truncated encoding
+                text_tokens = clip.tokenize([text], truncate=True).to(self.device)
+                with torch.no_grad():
+                    text_features = self.model.encode_text(text_tokens)
+                    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                all_text_features.append(text_features)
 
-        with torch.no_grad():
-            text_features = self.model.encode_text(text_tokens)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-        return text_features
+        return torch.cat(all_text_features, dim=0)
 
     def _calculate_mse(self, rendered_pngs: List[bytes], input_images: List[Image.Image]) -> List[float]:
         """Calculate MSE between rendered SVGs and input images, scaled to 0-1.
@@ -274,19 +337,22 @@ class SVGRewardFunction:
         rendering_scores, rendered_pngs = self._render_svg(svg_strings, format_scores)
         self.rewards["rendering"] += sum(rendering_scores)
 
-        # Calculate CLIP similarity scores
-        clip_scores = self._clip_similarity(rendered_pngs, ground_truth_embeddings)
+        # Calculate CLIP similarity scores only if clip_weight > 0
+        if self.clip_weight > 0:
+            clip_scores = self._clip_similarity(rendered_pngs, ground_truth_embeddings)
+        else:
+            clip_scores = [0.0] * len(completions)
         self.rewards["clip"] += sum(clip_scores)
 
         # Handle text embeddings
-        if text_embeddings is not None:
+        if text_embeddings is not None and self.text_weight > 0:
             text_scores = self._clip_text_reward_func(rendered_pngs, text_embeddings)
         else:
             text_scores = [0.0] * len(completions)
         self.rewards["text"] += sum(text_scores)
 
         # Handle MSE reward
-        if mse_reward:
+        if mse_reward and self.mse_weight > 0:
             if input_images is None:
                 raise ValueError("MSE reward requested but no input images provided")
             mse_scores = self._calculate_mse(rendered_pngs, input_images)

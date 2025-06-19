@@ -1,4 +1,4 @@
-from transformers.integrations import WandbCallback
+from transformers.integrations.integration_utils import WandbCallback
 import pandas as pd
 from rewards import SVGRewardFunction
 
